@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "777104655780",
+    "project_id": "clubx-d21f0",
+    "storage_bucket": "clubx-d21f0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777104655780:android:e708b580b7617d8785ed31",
+        "android_client_info": {
+          "package_name": "Club.X"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZehfliZTvnQ4OuObNTsEqT-k980PXpa0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777104655780:android:22b84024350b93e985ed31",
+        "android_client_info": {
+          "package_name": "com.example.clubx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZehfliZTvnQ4OuObNTsEqT-k980PXpa0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
