@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'router/app_router.dart';
+import 'utils/cloudinary_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -9,6 +11,15 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
+  // Configure Firestore settings for better cache management
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true, // Keep persistence for offline support
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+  );
+  
+  // Initialize Cloudinary for image uploads
+  CloudinaryService().initialize();
   
   runApp(const ClubXApp());
 }

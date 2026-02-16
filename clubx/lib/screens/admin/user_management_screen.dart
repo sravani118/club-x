@@ -16,6 +16,12 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   void _changeUserRole(String userId, String userName, String currentRole, String newRole) {
     if (currentRole == newRole) return;
 
+    // If changing to coordinator, show club selection dialog first
+    if (newRole == 'coordinator') {
+      _showClubSelectionDialog(userId, userName);
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -37,10 +43,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ElevatedButton(
             onPressed: () async {
               try {
+                debugPrint('🎯 [ADMIN] Changing role: userId=$userId, from=$currentRole, to=$newRole');
+                
+                // Remove clubId if changing away from coordinator (use set with merge to handle edge cases)
+                final Map<String, dynamic> updateData = {'role': newRole};
+                if (currentRole == 'coordinator') {
+                  updateData['clubId'] = FieldValue.delete();
+                  debugPrint('🗑️ [ADMIN] Removing clubId from former coordinator');
+                }
+                
                 await FirebaseFirestore.instance
                     .collection('users')
                     .doc(userId)
-                    .update({'role': newRole});
+                    .set(updateData, SetOptions(merge: true));
+                
+                debugPrint('✅ [ADMIN] Role change successful');
 
                 if (mounted) {
                   Navigator.pop(context);
@@ -76,6 +93,167 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         ],
       ),
     );
+  }
+
+  void _showClubSelectionDialog(String userId, String userName) {
+    String? selectedClubId;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2332),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Assign Club to Coordinator',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Select a club for $userName',
+              style: TextStyle(color: Colors.grey[300]),
+            ),
+            const SizedBox(height: 16),
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('clubs').snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final clubs = snapshot.data!.docs;
+                
+                if (clubs.isEmpty) {
+                  return Text(
+                    'No clubs available. Please create a club first.',
+                    style: TextStyle(color: Colors.grey[400]),
+                  );
+                }
+
+                return Container(
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: clubs.map((club) {
+                        final clubData = club.data() as Map<String, dynamic>;
+                        final clubName = clubData['name'] ?? 'Unnamed Club';
+                        
+                        return RadioListTile<String>(
+                          title: Text(
+                            clubName,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Text(
+                            clubData['category'] ?? '',
+                            style: TextStyle(color: Colors.grey[500]),
+                          ),
+                          value: club.id,
+                          groupValue: selectedClubId,
+                          onChanged: (value) {
+                            Navigator.pop(context);
+                            _confirmCoordinatorAssignment(userId, userName, value!);
+                          },
+                          activeColor: const Color(0xFFFF6B2C),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmCoordinatorAssignment(String userId, String userName, String clubId) async {
+    try {
+      debugPrint('🎯 [ADMIN] Assigning coordinator: userId=$userId, userName=$userName, clubId=$clubId');
+      debugPrint('🔍 [ADMIN] clubId validation: isEmpty=${clubId.isEmpty}, length=${clubId.length}');
+      
+      // Validate clubId is not empty
+      if (clubId.trim().isEmpty) {
+        debugPrint('❌ [ADMIN] ERROR: clubId is empty!');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Error: Club ID is empty'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Use .set() with merge: true instead of .update() to handle both existing and new documents
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .set({
+        'role': 'coordinator',
+        'clubId': clubId.trim(), // Ensure no extra whitespace
+      }, SetOptions(merge: true));
+      
+      debugPrint('✅ [ADMIN] Coordinator assignment successful');
+      
+      // Add a small delay to ensure Firestore propagation
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Verify the assignment by reading from server
+      final verifyDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get(const GetOptions(source: Source.server));
+      
+      if (verifyDoc.exists) {
+        final verifyData = verifyDoc.data();
+        debugPrint('🔍 [ADMIN] Verification - role: ${verifyData?['role']}, clubId: ${verifyData?['clubId']}');
+        
+        // Double-check the clubId was saved correctly
+        final savedClubId = verifyData?['clubId'];
+        if (savedClubId == null || savedClubId.toString().trim().isEmpty) {
+          debugPrint('⚠️ [ADMIN] WARNING: clubId was not saved correctly!');
+        } else {
+          debugPrint('✅ [ADMIN] Verification successful - clubId saved: $savedClubId');
+        }
+      } else {
+        debugPrint('❌ [ADMIN] ERROR: User document does not exist after assignment!');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$userName assigned as coordinator'),
+            backgroundColor: const Color(0xFFFF6B2C),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ [ADMIN] Coordinator assignment failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   void _removeUser(String userId, String userName) {

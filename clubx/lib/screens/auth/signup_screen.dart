@@ -105,7 +105,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
         password: _passwordController.text,
       );
 
-      // Create Firestore document
+      // Create Firestore document (use merge: true to handle edge cases where doc might exist)
       await FirebaseFirestore.instance
           .collection('users')
           .doc(userCredential.user!.uid)
@@ -114,7 +114,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
         'email': _emailController.text.trim(),
         'role': 'student',
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -126,7 +126,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
           ),
         );
         
-        context.go('/home');
+        context.go('/student');
       }
     } on FirebaseAuthException catch (e) {
       String errorMessage;

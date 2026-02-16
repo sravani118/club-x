@@ -28,193 +28,203 @@ class _AdminDashboardState extends State<AdminDashboard> {
     const SettingsScreen(),
   ];
 
-  void _showProfileSheet(BuildContext context) async {
+  void _showProfileSheet(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-
-    // Fetch admin details from Firestore
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-
-    final userData = userDoc.data();
-    final adminName = userData?['name'] ?? 'Admin';
-    final adminEmail = user.email ?? '';
-    final profileImage = userData?['profileImage'];
-
-    if (!context.mounted) return;
 
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF1A2332),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag Handle
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 24),
-                decoration: BoxDecoration(
-                  color: Colors.grey[600],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              // Profile Avatar
-              CircleAvatar(
-                radius: 50,
-                backgroundColor: const Color(0xFFFF6B2C),
-                backgroundImage: profileImage != null
-                    ? NetworkImage(profileImage)
-                    : null,
-                child: profileImage == null
-                    ? Text(
-                        adminName[0].toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              // Admin Name
-              Text(
-                adminName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              // Email
-              Text(
-                adminEmail,
-                style: TextStyle(
-                  color: Colors.grey[400],
-                  fontSize: 16,
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Role Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.red.withOpacity(0.5)),
-                ),
-                child: const Text(
-                  'Admin',
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+      builder: (context) => StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .snapshots(includeMetadataChanges: true),
+        builder: (context, snapshot) {
+          // Skip if only metadata changed
+          if (snapshot.hasData && snapshot.data!.metadata.hasPendingWrites) {
+            debugPrint('⏳ [ADMIN_PROFILE] Pending writes, skipping...');
+          }
+          if (snapshot.hasData && snapshot.data!.metadata.isFromCache) {
+            debugPrint('💾 [ADMIN_PROFILE] Data from cache');
+          } else if (snapshot.hasData) {
+            debugPrint('🌐 [ADMIN_PROFILE] Data from server');
+          }
+          final userData = snapshot.data?.data() as Map<String, dynamic>?;
+          final adminName = userData?['name'] ?? 'Admin';
+          final profileImageUrl = userData?['profileImage'] as String?;
+          final profileImage = (profileImageUrl != null && profileImageUrl.isNotEmpty) 
+              ? profileImageUrl 
+              : null;
+          
+          debugPrint('📸 [ADMIN_PROFILE_SHEET] Profile image URL: ${profileImage?.substring(0, 60) ?? "null"}...');
+          debugPrint('👤 [ADMIN_PROFILE_SHEET] Admin name: $adminName');
+
+          return Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF1A2332),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: const EdgeInsets.all(24),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Drag Handle
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[600],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              // Divider
-              Divider(color: Colors.grey[800], thickness: 1),
-              const SizedBox(height: 24),
-              // Edit Profile Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    Navigator.pop(context);
-                    // Navigate to edit profile screen
-                    final result = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const EditProfileScreen(),
-                      ),
-                    );
-                    // Refresh if profile was updated
-                    if (result == true && context.mounted) {
-                      setState(() {}); // Trigger rebuild to refresh profile data
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
+                  // Profile Avatar
+                  CircleAvatar(
+                    key: ValueKey(profileImage ?? 'no-image'), // Force rebuild when URL changes
+                    radius: 50,
                     backgroundColor: const Color(0xFFFF6B2C),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 0,
+                    backgroundImage: profileImage != null
+                        ? NetworkImage(profileImage)
+                        : null,
+                    child: profileImage == null
+                        ? Text(
+                            adminName[0].toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 36,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                        : null,
                   ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.edit, size: 20),
-                      SizedBox(width: 8),
-                      Text(
-                        'Edit Profile',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Logout Button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () async {
-                    Navigator.pop(context);
-                    await FirebaseAuth.instance.signOut();
-                    if (context.mounted) {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(
-                          builder: (context) => const LandingScreen(),
-                        ),
-                        (route) => false,
-                      );
-                    }
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red, width: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                  const SizedBox(height: 16),
+                  // Admin Name
+                  Text(
+                    adminName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.logout, size: 20),
-                      SizedBox(width: 8),
-                      Text(
-                        'Logout',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                  const SizedBox(height: 12),
+                  // Role Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.red.withOpacity(0.5)),
+                    ),
+                    child: const Text(
+                      'Admin',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // Divider
+                  Divider(color: Colors.grey[800], thickness: 1),
+                  const SizedBox(height: 24),
+                  // Edit Profile Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        // Navigate to edit profile screen
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const EditProfileScreen(),
+                          ),
+                        );
+                        
+                        // If profile was updated, clear image cache
+                        if (result == true) {
+                          debugPrint('✅ [ADMIN_DASHBOARD] Profile updated, clearing image cache');
+                          imageCache.clear();
+                          imageCache.clearLiveImages();
+                        }
+                        // Profile will auto-refresh via StreamBuilder
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF6B2C),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.edit, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Edit Profile',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Logout Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        await FirebaseAuth.instance.signOut();
+                        if (context.mounted) {
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(
+                              builder: (context) => const LandingScreen(),
+                            ),
+                            (route) => false,
+                          );
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red, width: 2),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                    ],
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.logout, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Logout',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -228,6 +238,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F1B2D),
         elevation: 0,
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'images/logo.png',
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+        ),
         title: const Text(
           'Admin Dashboard',
           style: TextStyle(
@@ -295,21 +320,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
           // Profile Avatar
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: FutureBuilder<DocumentSnapshot>(
-              future: user != null
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: user != null
                   ? FirebaseFirestore.instance
                       .collection('users')
                       .doc(user.uid)
-                      .get()
+                      .snapshots(includeMetadataChanges: true)
                   : null,
               builder: (context, snapshot) {
+                // Skip rendering if only metadata changed
+                if (snapshot.hasData && snapshot.data!.metadata.hasPendingWrites) {
+                  // Still show UI but log
+                  debugPrint('⏳ [ADMIN_AVATAR] Pending writes');
+                }
                 final userData = snapshot.data?.data() as Map<String, dynamic>?;
                 final adminName = userData?['name'] ?? 'Admin';
-                final profileImage = userData?['profileImage'];
+                final profileImageUrl = userData?['profileImage'] as String?;
+                final profileImage = (profileImageUrl != null && profileImageUrl.isNotEmpty) 
+                    ? profileImageUrl 
+                    : null;
+                
+                debugPrint('📸 [ADMIN_AVATAR] Profile image: ${profileImage?.substring(0, 60) ?? "null"}...');
 
                 return GestureDetector(
                   onTap: () => _showProfileSheet(context),
                   child: CircleAvatar(
+                    key: ValueKey(profileImage ?? 'no-image-$adminName'), // Force rebuild
                     backgroundColor: const Color(0xFFFF6B2C),
                     backgroundImage: profileImage != null
                         ? NetworkImage(profileImage)

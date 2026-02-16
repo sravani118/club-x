@@ -60,42 +60,30 @@ class _LandingScreenState extends State<LandingScreen> with SingleTickerProvider
                     const SizedBox(height: 100),
                     // Club-X Logo
                     Container(
-                      width: 100,
-                      height: 100,
+                      width: 140,
+                      height: 140,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B2C),
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(28),
                         boxShadow: [
                           BoxShadow(
                             color: const Color(0xFFFF6B2C).withOpacity(0.4),
-                            blurRadius: 24,
-                            offset: const Offset(0, 10),
+                            blurRadius: 30,
+                            offset: const Offset(0, 0),
+                            spreadRadius: 5,
                           ),
                         ],
                       ),
-                      child: const Center(
-                        child: Text(
-                          'C',
-                          style: TextStyle(
-                            fontSize: 56,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(28),
+                        child: Image.asset(
+                          'images/logo.png',
+                          width: 140,
+                          height: 140,
+                          fit: BoxFit.cover,
                         ),
                       ),
                     ),
                     const SizedBox(height: 40),
-                    // App Title
-                    const Text(
-                      'Club-X',
-                      style: TextStyle(
-                        fontSize: 48,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: -1,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
                     // Tagline
                     const Text(
                       'Your Campus. Your Community.',
