@@ -5,6 +5,7 @@ import '../screens/landing_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/auth/signup_screen.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/admin/admin_dashboard.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
@@ -33,6 +34,11 @@ final GoRouter appRouter = GoRouter(
       path: '/login',
       name: 'login',
       builder: (context, state) => const LoginScreen(),
+    ),
+    GoRoute(
+      path: '/admin',
+      name: 'admin',
+      builder: (context, state) => const AdminDashboard(),
     ),
     // Add more routes here
   ],

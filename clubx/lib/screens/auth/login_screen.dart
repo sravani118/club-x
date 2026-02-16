@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import '../../widgets/primary_button.dart';
 
@@ -73,10 +74,55 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     });
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+
+      // Check user role from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .get();
+
+      // Admin emails configuration
+      final adminEmails = [
+        'admin@gmail.com',
+        'admin@clubx.com',
+        'admin@example.com',
+      ];
+
+      String userRole = 'student'; // Default role
+
+      // First check if email is in admin list (takes priority)
+      if (adminEmails.contains(_emailController.text.trim().toLowerCase())) {
+        userRole = 'admin';
+        
+        // Update or create Firestore document with admin role
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set({
+          'email': _emailController.text.trim(),
+          'role': 'admin',
+          'createdAt': userDoc.exists && userDoc.data()?['createdAt'] != null
+              ? userDoc.data()!['createdAt']
+              : FieldValue.serverTimestamp(),
+        });
+      } else if (userDoc.exists && userDoc.data() != null) {
+        // User document exists and not an admin email
+        userRole = userDoc.data()?['role'] ?? 'student';
+      } else {
+        // New user, create document with student role
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set({
+          'email': _emailController.text.trim(),
+          'role': 'student',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -87,8 +133,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
-        
-        context.go('/home');
+
+        // Redirect based on role
+        if (userRole == 'admin') {
+          context.go('/admin');
+        } else {
+          context.go('/home');
+        }
       }
     } on FirebaseAuthException catch (e) {
       String errorMessage;

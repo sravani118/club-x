@@ -5,6 +5,7 @@ class PrimaryButton extends StatelessWidget {
   final VoidCallback onPressed;
   final bool isLoading;
   final bool isOutlined;
+  final IconData? icon;
 
   const PrimaryButton({
     super.key,
@@ -12,6 +13,7 @@ class PrimaryButton extends StatelessWidget {
     required this.onPressed,
     this.isLoading = false,
     this.isOutlined = false,
+    this.icon,
   });
 
   @override
@@ -24,10 +26,7 @@ class PrimaryButton extends StatelessWidget {
               onPressed: isLoading ? null : onPressed,
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFFF6B2C),
-                side: const BorderSide(
-                  color: Color(0xFFFF6B2C),
-                  width: 2,
-                ),
+                side: const BorderSide(color: Color(0xFFFF6B2C), width: 2),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
@@ -39,16 +38,27 @@ class PrimaryButton extends StatelessWidget {
                       width: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B2C)),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFFFF6B2C),
+                        ),
                       ),
                     )
-                  : Text(
-                      text,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (icon != null) ...[
+                          Icon(icon, size: 22),
+                          const SizedBox(width: 8),
+                        ],
+                        Text(
+                          text,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
                     ),
             )
           : ElevatedButton(
@@ -72,13 +82,22 @@ class PrimaryButton extends StatelessWidget {
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
-                  : Text(
-                      text,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (icon != null) ...[
+                          Icon(icon, color: Colors.white, size: 22),
+                          const SizedBox(width: 8),
+                        ],
+                        Text(
+                          text,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
                     ),
             ),
     );
