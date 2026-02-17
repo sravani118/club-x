@@ -95,13 +95,13 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
           return;
         }
       } catch (e) {
-        // If error fetching role, sign out and go to landing
+        // If error fetching role, sign out and go to role selection
         await FirebaseAuth.instance.signOut();
       }
     }
     
-    // Not logged in or error occurred
-    context.go('/landing');
+    // Not logged in or error occurred - go to role selection
+    context.go('/role-selection');
   }
 
   @override

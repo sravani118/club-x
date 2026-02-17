@@ -24,6 +24,72 @@ class _EventQRPassScreenState extends State<EventQRPassScreen>
   String _errorMessage = '';
   Map<String, dynamic>? _eventData;
 
+  /// Calculate actual event status based on date and time
+  String _getActualEventStatus(Map<String, dynamic> eventData) {
+    try {
+      final eventDate = (eventData['date'] as Timestamp).toDate();
+      final eventTime = eventData['time'] as String?;
+      final eventDuration = eventData['duration'] as int? ?? 60;
+
+      // If time is missing, fall back to date-only comparison
+      if (eventTime == null || eventTime.isEmpty) {
+        final now = DateTime.now();
+        final eventEndOfDay = DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          23,
+          59,
+          59,
+        );
+        
+        if (now.isAfter(eventEndOfDay)) {
+          return 'completed';
+        } else if (now.year == eventDate.year && 
+                   now.month == eventDate.month && 
+                   now.day == eventDate.day) {
+          return 'ongoing';
+        } else {
+          return 'upcoming';
+        }
+      }
+
+      // Parse time - handle both "HH:mm" and "HH:mm AM/PM" formats
+      String cleanTime = eventTime.replaceAll(RegExp(r'\s*(AM|PM|am|pm)\s*'), '').trim();
+      final timeParts = cleanTime.split(':');
+      int hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+
+      // Adjust for 12-hour format if AM/PM is present
+      if (eventTime.toUpperCase().contains('PM') && hour < 12) {
+        hour += 12;
+      } else if (eventTime.toUpperCase().contains('AM') && hour == 12) {
+        hour = 0;
+      }
+
+      final eventDateTime = DateTime(
+        eventDate.year,
+        eventDate.month,
+        eventDate.day,
+        hour,
+        minute,
+      );
+
+      final eventEndTime = eventDateTime.add(Duration(minutes: eventDuration));
+      final now = DateTime.now();
+
+      if (now.isBefore(eventDateTime)) {
+        return 'upcoming';
+      } else if (now.isAfter(eventEndTime)) {
+        return 'completed';
+      } else {
+        return 'ongoing';
+      }
+    } catch (e) {
+      return eventData['status'] ?? 'upcoming';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -84,10 +150,10 @@ class _EventQRPassScreenState extends State<EventQRPassScreen>
       }
 
       final eventData = eventDoc.data()!;
-      final status = eventData['status'] as String?;
+      final actualStatus = _getActualEventStatus(eventData);
 
       // Check if event is upcoming or ongoing
-      if (status != 'upcoming' && status != 'ongoing') {
+      if (actualStatus != 'upcoming' && actualStatus != 'ongoing') {
         setState(() {
           _isLoading = false;
           _errorMessage = 'Event pass is only available for upcoming or ongoing events.';
@@ -231,7 +297,7 @@ class _EventQRPassScreenState extends State<EventQRPassScreen>
     final title = _eventData?['title'] ?? 'Event';
     final date = (_eventData?['date'] as Timestamp?)?.toDate();
     final venue = _eventData?['venue'] ?? 'TBA';
-    final status = _eventData?['status'] ?? 'upcoming';
+    final actualStatus = _eventData != null ? _getActualEventStatus(_eventData!) : 'upcoming';
     final clubId = _eventData?['clubId'];
 
     return Container(
@@ -269,7 +335,7 @@ class _EventQRPassScreenState extends State<EventQRPassScreen>
                 ),
               ),
               const SizedBox(width: 12),
-              _buildStatusBadge(status),
+              _buildStatusBadge(actualStatus),
             ],
           ),
           

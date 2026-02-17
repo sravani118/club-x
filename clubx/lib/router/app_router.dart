@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../screens/splash_screen.dart';
+import '../screens/role_selection_screen.dart';
 import '../screens/landing_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/auth/signup_screen.dart';
@@ -18,6 +19,11 @@ final GoRouter appRouter = GoRouter(
       builder: (context, state) => const SplashScreen(),
     ),
     GoRoute(
+      path: '/role-selection',
+      name: 'role-selection',
+      builder: (context, state) => const RoleSelectionScreen(),
+    ),
+    GoRoute(
       path: '/landing',
       name: 'landing',
       builder: (context, state) => const LandingScreen(),
@@ -30,12 +36,18 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/signup',
       name: 'signup',
-      builder: (context, state) => const SignupScreen(),
+      builder: (context, state) {
+        final role = state.uri.queryParameters['role'] ?? 'student';
+        return SignupScreen(selectedRole: role);
+      },
     ),
     GoRoute(
       path: '/login',
       name: 'login',
-      builder: (context, state) => const LoginScreen(),
+      builder: (context, state) {
+        final role = state.uri.queryParameters['role'] ?? 'student';
+        return LoginScreen(selectedRole: role);
+      },
     ),
     GoRoute(
       path: '/admin',

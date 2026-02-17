@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../widgets/primary_button.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String selectedRole;
+  
+  const LoginScreen({super.key, this.selectedRole = 'student'});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -62,6 +64,32 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       return 'Password must be at least 6 characters';
     }
     return null;
+  }
+
+  Color _getRoleColor() {
+    switch (widget.selectedRole.toLowerCase()) {
+      case 'admin':
+        return const Color(0xFF6C63FF);
+      case 'coordinator':
+        return const Color(0xFFFF6B2C);
+      case 'student':
+        return const Color(0xFF4CAF50);
+      default:
+        return const Color(0xFF4CAF50);
+    }
+  }
+
+  IconData _getRoleIcon() {
+    switch (widget.selectedRole.toLowerCase()) {
+      case 'admin':
+        return Icons.admin_panel_settings;
+      case 'coordinator':
+        return Icons.groups;
+      case 'student':
+        return Icons.school;
+      default:
+        return Icons.school;
+    }
   }
 
   Future<void> _handleLogin() async {
@@ -124,17 +152,121 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         if (userRole == 'coordinator') {
           debugPrint('🏛️ [LOGIN] Coordinator detected - clubId: ${userData['clubId']}');
         }
+        
+        // Auto-assign Student ID for students who don't have one (migration logic)
+        if (userRole == 'student' && 
+            (userData['studentId'] == null || userData['studentId'].toString().trim().isEmpty)) {
+          debugPrint('🆔 [LOGIN] Student missing ID, generating...');
+          
+          try {
+            // Use transaction to generate unique Student ID
+            final generatedStudentId = await FirebaseFirestore.instance.runTransaction<String>((transaction) async {
+              // Reference to counter document
+              final counterRef = FirebaseFirestore.instance
+                  .collection('counters')
+                  .doc('studentCounter');
+              
+              // Get current counter value
+              final counterDoc = await transaction.get(counterRef);
+              
+              int currentCount;
+              if (!counterDoc.exists) {
+                // First student - initialize counter
+                currentCount = 0;
+              } else {
+                currentCount = counterDoc.data()?['current'] ?? 0;
+              }
+              
+              // Increment counter
+              final newCount = currentCount + 1;
+              
+              // Generate formatted Student ID
+              final paddedNumber = newCount.toString().padLeft(4, '0');
+              final studentId = 'CLX-STU-$paddedNumber';
+              
+              // Update counter
+              transaction.set(counterRef, {'current': newCount});
+              
+              // Update user document with generated Student ID
+              final userRef = FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(userCredential.user!.uid);
+              
+              transaction.update(userRef, {
+                'studentId': studentId,
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+              
+              return studentId;
+            });
+            
+            debugPrint('✅ [LOGIN] Student ID generated: $generatedStudentId');
+          } catch (e) {
+            debugPrint('❌ [LOGIN] Error generating Student ID: $e');
+            // Continue login even if ID generation fails
+          }
+        }
         // No write operation - preserves all fields including clubId
       } else {
-        // New user, create document with student role (use merge to preserve any existing fields)
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userCredential.user!.uid)
-            .set({
-          'email': _emailController.text.trim(),
-          'role': 'student',
-          'createdAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        // New user logging in without existing document - generate Student ID with transaction
+        debugPrint('🆔 [LOGIN] New user, generating Student ID...');
+        
+        try {
+          final generatedStudentId = await FirebaseFirestore.instance.runTransaction<String>((transaction) async {
+            // Reference to counter document
+            final counterRef = FirebaseFirestore.instance
+                .collection('counters')
+                .doc('studentCounter');
+            
+            // Get current counter value
+            final counterDoc = await transaction.get(counterRef);
+            
+            int currentCount;
+            if (!counterDoc.exists) {
+              // First student - initialize counter
+              currentCount = 0;
+            } else {
+              currentCount = counterDoc.data()?['current'] ?? 0;
+            }
+            
+            // Increment counter
+            final newCount = currentCount + 1;
+            
+            // Generate formatted Student ID
+            final paddedNumber = newCount.toString().padLeft(4, '0');
+            final studentId = 'CLX-STU-$paddedNumber';
+            
+            // Update counter
+            transaction.set(counterRef, {'current': newCount});
+            
+            // Create user document with Student ID
+            final userRef = FirebaseFirestore.instance
+                .collection('users')
+                .doc(userCredential.user!.uid);
+            
+            transaction.set(userRef, {
+              'email': _emailController.text.trim(),
+              'role': 'student',
+              'studentId': studentId,
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+            
+            return studentId;
+          });
+          
+          debugPrint('✅ [LOGIN] Student ID generated: $generatedStudentId');
+        } catch (e) {
+          debugPrint('❌ [LOGIN] Error generating Student ID: $e');
+          // Fallback to creating without ID
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userCredential.user!.uid)
+              .set({
+            'email': _emailController.text.trim(),
+            'role': 'student',
+            'createdAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
       }
 
       if (mounted) {
@@ -217,7 +349,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.go('/landing'),
+          onPressed: () => context.go('/role-selection'),
         ),
       ),
       body: SafeArea(
@@ -240,6 +372,41 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                         letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Role Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getRoleColor().withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _getRoleColor().withOpacity(0.3),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _getRoleIcon(),
+                            color: _getRoleColor(),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Logging in as ${widget.selectedRole.substring(0, 1).toUpperCase()}${widget.selectedRole.substring(1)}',
+                            style: TextStyle(
+                              color: _getRoleColor(),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -322,7 +489,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     // Navigate to Signup
                     Center(
                       child: TextButton(
-                        onPressed: () => context.go('/signup'),
+                        onPressed: () => context.go('/signup?role=${widget.selectedRole}'),
                         child: RichText(
                           text: TextSpan(
                             text: "Don't have an account? ",

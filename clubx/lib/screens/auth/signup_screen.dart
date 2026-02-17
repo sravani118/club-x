@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../widgets/primary_button.dart';
 
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({super.key});
+  final String selectedRole;
+  
+  const SignupScreen({super.key, this.selectedRole = 'student'});
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -89,6 +91,32 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
     return null;
   }
 
+  Color _getRoleColor() {
+    switch (widget.selectedRole.toLowerCase()) {
+      case 'admin':
+        return const Color(0xFF6C63FF);
+      case 'coordinator':
+        return const Color(0xFFFF6B2C);
+      case 'student':
+        return const Color(0xFF4CAF50);
+      default:
+        return const Color(0xFF4CAF50);
+    }
+  }
+
+  IconData _getRoleIcon() {
+    switch (widget.selectedRole.toLowerCase()) {
+      case 'admin':
+        return Icons.admin_panel_settings;
+      case 'coordinator':
+        return Icons.groups;
+      case 'student':
+        return Icons.school;
+      default:
+        return Icons.school;
+    }
+  }
+
   Future<void> _handleSignup() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -105,23 +133,59 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
         password: _passwordController.text,
       );
 
-      // Create Firestore document (use merge: true to handle edge cases where doc might exist)
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userCredential.user!.uid)
-          .set({
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'role': 'student',
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final uid = userCredential.user!.uid;
+
+      // Use transaction to generate unique Student ID
+      final generatedStudentId = await FirebaseFirestore.instance.runTransaction<String>((transaction) async {
+        // Reference to counter document
+        final counterRef = FirebaseFirestore.instance
+            .collection('counters')
+            .doc('studentCounter');
+        
+        // Get current counter value
+        final counterDoc = await transaction.get(counterRef);
+        
+        int currentCount;
+        if (!counterDoc.exists) {
+          // First student - initialize counter
+          currentCount = 0;
+        } else {
+          currentCount = counterDoc.data()?['current'] ?? 0;
+        }
+        
+        // Increment counter
+        final newCount = currentCount + 1;
+        
+        // Generate formatted Student ID
+        final paddedNumber = newCount.toString().padLeft(4, '0');
+        final studentId = 'CLX-STU-$paddedNumber';
+        
+        // Update counter
+        transaction.set(counterRef, {'current': newCount});
+        
+        // Create user document with generated Student ID
+        final userRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid);
+        
+        transaction.set(userRef, {
+          'name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'role': 'student',
+          'studentId': studentId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        
+        return studentId;
+      });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Account created successfully!'),
+            content: Text('Account created! Your Student ID: $generatedStudentId'),
             backgroundColor: const Color(0xFFFF6B2C),
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
@@ -186,7 +250,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.go('/landing'),
+          onPressed: () => context.go('/role-selection'),
         ),
       ),
       body: SafeArea(
@@ -209,6 +273,41 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                         letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Role Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getRoleColor().withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _getRoleColor().withOpacity(0.3),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _getRoleIcon(),
+                            color: _getRoleColor(),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Signing up as ${widget.selectedRole.substring(0, 1).toUpperCase()}${widget.selectedRole.substring(1)}',
+                            style: TextStyle(
+                              color: _getRoleColor(),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -293,7 +392,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                     // Navigate to Login
                     Center(
                       child: TextButton(
-                        onPressed: () => context.go('/login'),
+                        onPressed: () => context.go('/login?role=${widget.selectedRole}'),
                         child: RichText(
                           text: TextSpan(
                             text: 'Already have an account? ',

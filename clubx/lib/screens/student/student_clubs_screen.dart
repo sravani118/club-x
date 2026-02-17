@@ -143,38 +143,71 @@ class _StudentClubsScreenState extends State<StudentClubsScreen> {
   }
 
   Widget _buildCategoryFilter() {
-    final categories = ['All', 'Technical', 'Cultural', 'Sports', 'Arts', 'Social'];
-    
-    return SizedBox(
-      height: 40,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: categories.length,
-        itemBuilder: (context, index) {
-          final category = categories[index];
-          final isSelected = _selectedCategory == category;
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('clubs')
+          .where('status', isEqualTo: 'active')
+          .snapshots(),
+      builder: (context, snapshot) {
+        // Get unique categories from active clubs
+        final categories = <String>['All'];
+        
+        if (snapshot.hasData) {
+          final uniqueCategories = snapshot.data!.docs
+              .map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                return data['category'] as String?;
+              })
+              .where((category) => category != null && category.isNotEmpty)
+              .cast<String>() // Cast to non-nullable after filtering nulls
+              .toSet()
+              .toList();
           
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              label: Text(category),
-              selected: isSelected,
-              onSelected: (selected) {
-                setState(() => _selectedCategory = category);
-              },
-              backgroundColor: const Color(0xFF1A2840),
-              selectedColor: const Color(0xFFFF6B2C),
-              labelStyle: TextStyle(
-                color: isSelected ? Colors.white : Colors.grey,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-              ),
-              side: BorderSide(
-                color: isSelected ? const Color(0xFFFF6B2C) : Colors.grey.withOpacity(0.3),
-              ),
-            ),
-          );
-        },
-      ),
+          uniqueCategories.sort(); // Sort alphabetically
+          categories.addAll(uniqueCategories);
+        }
+        
+        // Reset filter if selected category no longer exists
+        if (!categories.contains(_selectedCategory)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() => _selectedCategory = 'All');
+            }
+          });
+        }
+        
+        return SizedBox(
+          height: 40,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: categories.length,
+            itemBuilder: (context, index) {
+              final category = categories[index];
+              final isSelected = _selectedCategory == category;
+              
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilterChip(
+                  label: Text(category),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() => _selectedCategory = category);
+                  },
+                  backgroundColor: const Color(0xFF1A2840),
+                  selectedColor: const Color(0xFFFF6B2C),
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.white : Colors.grey,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  side: BorderSide(
+                    color: isSelected ? const Color(0xFFFF6B2C) : Colors.grey.withOpacity(0.3),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 

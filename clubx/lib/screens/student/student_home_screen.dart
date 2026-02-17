@@ -6,6 +6,72 @@ import 'package:intl/intl.dart';
 class StudentHomeScreen extends StatelessWidget {
   const StudentHomeScreen({super.key});
 
+  /// Calculate actual event status based on date and time
+  String _getActualEventStatus(Map<String, dynamic> eventData) {
+    try {
+      final eventDate = (eventData['date'] as Timestamp).toDate();
+      final eventTime = eventData['time'] as String?;
+      final eventDuration = eventData['duration'] as int? ?? 60;
+
+      // If time is missing, fall back to date-only comparison
+      if (eventTime == null || eventTime.isEmpty) {
+        final now = DateTime.now();
+        final eventEndOfDay = DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          23,
+          59,
+          59,
+        );
+        
+        if (now.isAfter(eventEndOfDay)) {
+          return 'completed';
+        } else if (now.year == eventDate.year && 
+                   now.month == eventDate.month && 
+                   now.day == eventDate.day) {
+          return 'ongoing';
+        } else {
+          return 'upcoming';
+        }
+      }
+
+      // Parse time - handle both "HH:mm" and "HH:mm AM/PM" formats
+      String cleanTime = eventTime.replaceAll(RegExp(r'\s*(AM|PM|am|pm)\s*'), '').trim();
+      final timeParts = cleanTime.split(':');
+      int hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+
+      // Adjust for 12-hour format if AM/PM is present
+      if (eventTime.toUpperCase().contains('PM') && hour < 12) {
+        hour += 12;
+      } else if (eventTime.toUpperCase().contains('AM') && hour == 12) {
+        hour = 0;
+      }
+
+      final eventDateTime = DateTime(
+        eventDate.year,
+        eventDate.month,
+        eventDate.day,
+        hour,
+        minute,
+      );
+
+      final eventEndTime = eventDateTime.add(Duration(minutes: eventDuration));
+      final now = DateTime.now();
+
+      if (now.isBefore(eventDateTime)) {
+        return 'upcoming';
+      } else if (now.isAfter(eventEndTime)) {
+        return 'completed';
+      } else {
+        return 'ongoing';
+      }
+    } catch (e) {
+      return eventData['status'] ?? 'upcoming';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -160,10 +226,11 @@ class StudentHomeScreen extends StatelessWidget {
                           );
                         }
 
-                        // Filter out completed events and sort by date
+                        // Filter out completed events based on actual date and sort by date
                         var events = eventsSnapshot.data!.docs.where((doc) {
-                          final status = (doc.data() as Map<String, dynamic>)['status'] ?? '';
-                          return status.toLowerCase() != 'completed';
+                          final eventData = doc.data() as Map<String, dynamic>;
+                          final actualStatus = _getActualEventStatus(eventData);
+                          return actualStatus != 'completed';
                         }).toList();
 
                         // Sort by date (upcoming first)
@@ -268,12 +335,12 @@ class StudentHomeScreen extends StatelessWidget {
 
   Widget _buildEventCard(BuildContext context, Map<String, dynamic> eventData) {
     final DateTime eventDate = (eventData['date'] as Timestamp).toDate();
-    final String status = eventData['status'] ?? 'upcoming';
+    final String actualStatus = _getActualEventStatus(eventData);
     
     Color statusColor;
     String statusText;
     
-    switch (status) {
+    switch (actualStatus) {
       case 'ongoing':
         statusColor = Colors.green;
         statusText = 'Ongoing';
