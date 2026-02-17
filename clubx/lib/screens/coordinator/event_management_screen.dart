@@ -20,6 +20,84 @@ class EventManagementScreen extends StatefulWidget {
 class _EventManagementScreenState extends State<EventManagementScreen> {
   String _selectedFilter = 'all'; // all, upcoming, ongoing, completed
 
+  String _getActualEventStatus(Map<String, dynamic> eventData) {
+    try {
+      final eventDate = (eventData['date'] as Timestamp).toDate();
+      final eventTime = eventData['time'] as String?;
+      final eventDuration = eventData['duration'] as int? ?? 60;
+
+      // If time is missing, fall back to date-only comparison
+      if (eventTime == null || eventTime.isEmpty) {
+        final now = DateTime.now();
+        final eventEndOfDay = DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          23,
+          59,
+          59,
+        );
+        
+        debugPrint('🕐 [EVENT STATUS - DATE ONLY] ${eventData['title']}: EventDate=$eventDate, Now=$now');
+        
+        if (now.isAfter(eventEndOfDay)) {
+          debugPrint('  → Status: completed (date passed)');
+          return 'completed';
+        } else if (now.year == eventDate.year && 
+                   now.month == eventDate.month && 
+                   now.day == eventDate.day) {
+          debugPrint('  → Status: ongoing (today)');
+          return 'ongoing';
+        } else {
+          debugPrint('  → Status: upcoming (future date)');
+          return 'upcoming';
+        }
+      }
+
+      // Parse time - handle both "HH:mm" and "HH:mm AM/PM" formats
+      String cleanTime = eventTime.replaceAll(RegExp(r'\s*(AM|PM|am|pm)\s*'), '').trim();
+      final timeParts = cleanTime.split(':');
+      int hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+
+      // Adjust for 12-hour format if AM/PM is present
+      if (eventTime.toUpperCase().contains('PM') && hour < 12) {
+        hour += 12;
+      } else if (eventTime.toUpperCase().contains('AM') && hour == 12) {
+        hour = 0;
+      }
+
+      final eventDateTime = DateTime(
+        eventDate.year,
+        eventDate.month,
+        eventDate.day,
+        hour,
+        minute,
+      );
+
+      final eventEndTime = eventDateTime.add(Duration(minutes: eventDuration));
+      final now = DateTime.now();
+
+      debugPrint('🕐 [EVENT STATUS] ${eventData['title']}: Event=$eventDateTime, End=$eventEndTime, Now=$now');
+
+      if (now.isBefore(eventDateTime)) {
+        debugPrint('  → Status: upcoming');
+        return 'upcoming';
+      } else if (now.isAfter(eventEndTime)) {
+        debugPrint('  → Status: completed');
+        return 'completed';
+      } else {
+        debugPrint('  → Status: ongoing');
+        return 'ongoing';
+      }
+    } catch (e) {
+      debugPrint('❌ [EVENT STATUS ERROR] ${eventData['title']}: $e');
+      debugPrint('   Event data: date=${eventData['date']}, time=${eventData['time']}, duration=${eventData['duration']}');
+      // If there's an error, fall back to stored status
+      return eventData['status'] ?? 'upcoming';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -158,14 +236,34 @@ class _EventManagementScreenState extends State<EventManagementScreen> {
                   }
 
                   final events = snapshot.data!.docs;
-                  debugPrint('✅ [EVENTS] Displaying ${events.length} events');
+                  debugPrint('✅ [EVENTS] Received ${events.length} total events');
+
+                  // Filter events by actual status calculated from date/time
+                  final filteredEvents = events.where((eventDoc) {
+                    if (_selectedFilter == 'all') return true;
+                    
+                    final event = eventDoc.data() as Map<String, dynamic>;
+                    final actualStatus = _getActualEventStatus(event);
+                    return actualStatus == _selectedFilter;
+                  }).toList();
+
+                  debugPrint('✅ [EVENTS] Displaying ${filteredEvents.length} events after filtering by $_selectedFilter');
+
+                  if (filteredEvents.isEmpty) {
+                    return _buildEmptyState();
+                  }
 
                   return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    itemCount: events.length,
+                    padding: const EdgeInsets.only(
+                      left: 24,
+                      right: 24,
+                      bottom: 100, // Add space for FAB and last item
+                    ),
+                    itemCount: filteredEvents.length,
                     itemBuilder: (context, index) {
-                      final eventDoc = events[index];
+                      final eventDoc = filteredEvents[index];
                       final event = eventDoc.data() as Map<String, dynamic>;
+                      final actualStatus = _getActualEventStatus(event);
 
                       return CoordinatorEventCard(
                         eventId: eventDoc.id,
@@ -176,7 +274,7 @@ class _EventManagementScreenState extends State<EventManagementScreen> {
                         maxCapacity: event['maxCapacity'] ?? 0,
                         registeredCount: event['registeredCount'] ?? 0,
                         attendanceCount: event['attendanceCount'] ?? 0,
-                        status: event['status'] ?? 'upcoming',
+                        status: actualStatus,
                         bannerUrl: event['imageUrl'],
                         onEdit: () => _editEvent(eventDoc.id, event),
                         onDelete: () => _deleteEvent(eventDoc.id, event['title']),
@@ -290,16 +388,10 @@ class _EventManagementScreenState extends State<EventManagementScreen> {
   Stream<QuerySnapshot> _getEventsStream() {
     debugPrint('🔍 [EVENTS] Setting up stream for clubId: ${widget.clubId}');
     
-    Query query = FirebaseFirestore.instance
+    // Fetch all events for the club - filter by calculated status in memory
+    return FirebaseFirestore.instance
         .collection('events')
-        .where('clubId', isEqualTo: widget.clubId);
-
-    if (_selectedFilter != 'all') {
-      query = query.where('status', isEqualTo: _selectedFilter);
-      debugPrint('🔍 [EVENTS] Filtering by status: $_selectedFilter');
-    }
-
-    return query
+        .where('clubId', isEqualTo: widget.clubId)
         .orderBy('date', descending: false)
         .snapshots(includeMetadataChanges: true);
   }
@@ -414,6 +506,7 @@ class _CreateEventBottomSheetState extends State<_CreateEventBottomSheet> {
   final _descriptionController = TextEditingController();
   final _venueController = TextEditingController();
   final _capacityController = TextEditingController();
+  final _durationController = TextEditingController(text: '60');
   
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
@@ -431,6 +524,7 @@ class _CreateEventBottomSheetState extends State<_CreateEventBottomSheet> {
       _descriptionController.text = widget.existingData!['description'] ?? '';
       _venueController.text = widget.existingData!['venue'] ?? '';
       _capacityController.text = (widget.existingData!['maxCapacity'] ?? '').toString();
+      _durationController.text = (widget.existingData!['duration'] ?? 60).toString();
       
       if (widget.existingData!['date'] != null) {
         _selectedDate = (widget.existingData!['date'] as Timestamp).toDate();
@@ -451,6 +545,7 @@ class _CreateEventBottomSheetState extends State<_CreateEventBottomSheet> {
     _descriptionController.dispose();
     _venueController.dispose();
     _capacityController.dispose();
+    _durationController.dispose();
     super.dispose();
   }
   
@@ -659,6 +754,20 @@ class _CreateEventBottomSheetState extends State<_CreateEventBottomSheet> {
                 keyboardType: TextInputType.number,
                 validator: (value) {
                   if (value?.isEmpty ?? true) return 'Capacity is required';
+                  if (int.tryParse(value!) == null) return 'Enter a valid number';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // Duration
+              _buildTextField(
+                controller: _durationController,
+                label: 'Duration (minutes)',
+                hint: 'Enter event duration in minutes',
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value?.isEmpty ?? true) return 'Duration is required';
                   if (int.tryParse(value!) == null) return 'Enter a valid number';
                   return null;
                 },
@@ -890,13 +999,36 @@ class _CreateEventBottomSheetState extends State<_CreateEventBottomSheet> {
       // Note: We'll create event first, then upload image if needed
       String? imageUrl = _existingImageUrl;
 
+      // Get club name from clubs collection
+      String clubName = 'Unknown Club';
+      try {
+        final clubDoc = await FirebaseFirestore.instance
+            .collection('clubs')
+            .doc(widget.clubId)
+            .get();
+        
+        if (clubDoc.exists) {
+          clubName = clubDoc.data()?['name'] ?? 'Unknown Club';
+        }
+      } catch (e) {
+        debugPrint('⚠️ [EVENTS] Error fetching club name: $e');
+      }
+
+      // Format time as string
+      final hour = _selectedTime.hour;
+      final minute = _selectedTime.minute;
+      final timeString = '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+
       final eventData = {
         'clubId': widget.clubId,
+        'clubName': clubName,
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'venue': _venueController.text.trim(),
         'maxCapacity': int.parse(_capacityController.text),
         'date': Timestamp.fromDate(eventDate),
+        'time': timeString,
+        'duration': int.parse(_durationController.text),
         'registeredCount': widget.existingData?['registeredCount'] ?? 0,
         'attendanceCount': widget.existingData?['attendanceCount'] ?? 0,
         'status': widget.existingData?['status'] ?? 'upcoming',

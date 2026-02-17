@@ -110,14 +110,6 @@ class _MembersManagementScreenState extends State<MembersManagementScreen> {
                       final maxCapacity = clubData?['maxCapacity'] ?? 100;
                       final members = membersSnapshot.data!.docs;
 
-                      // Filter members based on search
-                      final filteredMembers = members.where((doc) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        final name = (data['name'] ?? '').toString().toLowerCase();
-                        final email = (data['email'] ?? '').toString().toLowerCase();
-                        return name.contains(_searchQuery) || email.contains(_searchQuery);
-                      }).toList();
-
                       return Column(
                         children: [
                           // Member Count
@@ -157,26 +149,93 @@ class _MembersManagementScreenState extends State<MembersManagementScreen> {
                           Expanded(
                             child: ListView.builder(
                               padding: const EdgeInsets.symmetric(horizontal: 24),
-                              itemCount: filteredMembers.length,
+                              itemCount: members.length,
                               itemBuilder: (context, index) {
-                                final memberDoc = filteredMembers[index];
-                                final member = memberDoc.data() as Map<String, dynamic>;
+                                final memberDoc = members[index];
+                                final memberId = memberDoc.id;
+                                final memberData = memberDoc.data() as Map<String, dynamic>;
 
-                                return FutureBuilder<double>(
-                                  future: _calculateAttendanceRate(memberDoc.id),
-                                  builder: (context, attendanceSnapshot) {
-                                    final attendanceRate = attendanceSnapshot.data ?? 0.0;
+                                // Try to use stored member data first, fallback to fetching from users
+                                final hasStoredData = memberData.containsKey('name') && 
+                                                     memberData.containsKey('email');
 
-                                    return MemberCard(
-                                      name: member['name'] ?? 'Unknown',
-                                      email: member['email'] ?? '',
-                                      avatarUrl: member['avatarUrl'] ?? '',
-                                      attendanceRate: attendanceRate,
-                                      onRemove: () => _showRemoveMemberDialog(
-                                        context,
-                                        memberDoc.id,
-                                        member['name'] ?? 'this member',
-                                      ),
+                                if (hasStoredData) {
+                                  // Use stored data
+                                  final name = memberData['name'] ?? 'Unknown';
+                                  final email = memberData['email'] ?? '';
+                                  final photoUrl = memberData['photoUrl'] ?? '';
+
+                                  // Check if member matches search query
+                                  if (_searchQuery.isNotEmpty) {
+                                    final nameMatch = name.toLowerCase().contains(_searchQuery);
+                                    final emailMatch = email.toLowerCase().contains(_searchQuery);
+                                    if (!nameMatch && !emailMatch) {
+                                      return const SizedBox.shrink();
+                                    }
+                                  }
+
+                                  return FutureBuilder<double>(
+                                    future: _calculateAttendanceRate(memberId),
+                                    builder: (context, attendanceSnapshot) {
+                                      final attendanceRate = attendanceSnapshot.data ?? 0.0;
+
+                                      return MemberCard(
+                                        name: name,
+                                        email: email,
+                                        avatarUrl: photoUrl,
+                                        attendanceRate: attendanceRate,
+                                        onRemove: () => _showRemoveMemberDialog(
+                                          context,
+                                          memberId,
+                                          name,
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }
+
+                                // Fallback: Fetch user details from users collection (for old members)
+                                return FutureBuilder<DocumentSnapshot>(
+                                  future: FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(memberId)
+                                      .get(),
+                                  builder: (context, userSnapshot) {
+                                    if (!userSnapshot.hasData) {
+                                      return const SizedBox();
+                                    }
+
+                                    final userData = userSnapshot.data!.data() as Map<String, dynamic>?;
+                                    final name = userData?['name'] ?? 'Unknown';
+                                    final email = userData?['email'] ?? '';
+                                    final photoUrl = userData?['photoUrl'] ?? '';
+
+                                    // Check if member matches search query
+                                    if (_searchQuery.isNotEmpty) {
+                                      final nameMatch = name.toLowerCase().contains(_searchQuery);
+                                      final emailMatch = email.toLowerCase().contains(_searchQuery);
+                                      if (!nameMatch && !emailMatch) {
+                                        return const SizedBox.shrink();
+                                      }
+                                    }
+
+                                    return FutureBuilder<double>(
+                                      future: _calculateAttendanceRate(memberId),
+                                      builder: (context, attendanceSnapshot) {
+                                        final attendanceRate = attendanceSnapshot.data ?? 0.0;
+
+                                        return MemberCard(
+                                          name: name,
+                                          email: email,
+                                          avatarUrl: photoUrl,
+                                          attendanceRate: attendanceRate,
+                                          onRemove: () => _showRemoveMemberDialog(
+                                            context,
+                                            memberId,
+                                            name,
+                                          ),
+                                        );
+                                      },
                                     );
                                   },
                                 );
@@ -234,34 +293,34 @@ class _MembersManagementScreenState extends State<MembersManagementScreen> {
 
   Future<double> _calculateAttendanceRate(String memberId) async {
     try {
-      // Get all events for this club
-      final eventsSnapshot = await FirebaseFirestore.instance
-          .collection('events')
+      // Get all closed sessions for this club
+      final sessionsSnapshot = await FirebaseFirestore.instance
+          .collection('clubSessions')
           .where('clubId', isEqualTo: widget.clubId)
-          .where('status', isEqualTo: 'completed')
+          .where('status', isEqualTo: 'closed')
           .get();
 
-      if (eventsSnapshot.docs.isEmpty) {
+      if (sessionsSnapshot.docs.isEmpty) {
         return 0.0;
       }
 
-      int totalEvents = eventsSnapshot.docs.length;
-      int attendedEvents = 0;
+      int totalSessions = sessionsSnapshot.docs.length;
+      int attendedSessions = 0;
 
-      for (var eventDoc in eventsSnapshot.docs) {
+      for (var sessionDoc in sessionsSnapshot.docs) {
         final attendanceDoc = await FirebaseFirestore.instance
-            .collection('attendance')
-            .doc(eventDoc.id)
-            .collection('attendees')
+            .collection('clubAttendance')
+            .doc(sessionDoc.id)
+            .collection('students')
             .doc(memberId)
             .get();
 
         if (attendanceDoc.exists) {
-          attendedEvents++;
+          attendedSessions++;
         }
       }
 
-      return (attendedEvents / totalEvents) * 100;
+      return (attendedSessions / totalSessions) * 100;
     } catch (e) {
       return 0.0;
     }

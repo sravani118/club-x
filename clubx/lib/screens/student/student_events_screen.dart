@@ -14,6 +14,72 @@ class StudentEventsScreen extends StatefulWidget {
 class _StudentEventsScreenState extends State<StudentEventsScreen> {
   String _selectedFilter = 'All';
 
+  /// Calculate actual event status based on date and time
+  String _getActualEventStatus(Map<String, dynamic> eventData) {
+    try {
+      final eventDate = (eventData['date'] as Timestamp).toDate();
+      final eventTime = eventData['time'] as String?;
+      final eventDuration = eventData['duration'] as int? ?? 60;
+
+      // If time is missing, fall back to date-only comparison
+      if (eventTime == null || eventTime.isEmpty) {
+        final now = DateTime.now();
+        final eventEndOfDay = DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          23,
+          59,
+          59,
+        );
+        
+        if (now.isAfter(eventEndOfDay)) {
+          return 'completed';
+        } else if (now.year == eventDate.year && 
+                   now.month == eventDate.month && 
+                   now.day == eventDate.day) {
+          return 'ongoing';
+        } else {
+          return 'upcoming';
+        }
+      }
+
+      // Parse time - handle both "HH:mm" and "HH:mm AM/PM" formats
+      String cleanTime = eventTime.replaceAll(RegExp(r'\s*(AM|PM|am|pm)\s*'), '').trim();
+      final timeParts = cleanTime.split(':');
+      int hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+
+      // Adjust for 12-hour format if AM/PM is present
+      if (eventTime.toUpperCase().contains('PM') && hour < 12) {
+        hour += 12;
+      } else if (eventTime.toUpperCase().contains('AM') && hour == 12) {
+        hour = 0;
+      }
+
+      final eventDateTime = DateTime(
+        eventDate.year,
+        eventDate.month,
+        eventDate.day,
+        hour,
+        minute,
+      );
+
+      final eventEndTime = eventDateTime.add(Duration(minutes: eventDuration));
+      final now = DateTime.now();
+
+      if (now.isBefore(eventDateTime)) {
+        return 'upcoming';
+      } else if (now.isAfter(eventEndTime)) {
+        return 'completed';
+      } else {
+        return 'ongoing';
+      }
+    } catch (e) {
+      return eventData['status'] ?? 'upcoming';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -133,7 +199,8 @@ class _StudentEventsScreenState extends State<StudentEventsScreen> {
 
                       // Filter out inactive events
                       events = events.where((doc) {
-                        final status = (doc.data() as Map<String, dynamic>)['status'] ?? '';
+                        final eventData = doc.data() as Map<String, dynamic>;
+                        final status = eventData['status'] ?? '';
                         return status.toLowerCase() != 'inactive';
                       }).toList();
 
@@ -146,11 +213,12 @@ class _StudentEventsScreenState extends State<StudentEventsScreen> {
                         return aDate.compareTo(bDate);
                       });
 
-                      // Apply filter
+                      // Apply filter based on actual calculated status
                       if (_selectedFilter != 'All') {
                         events = events.where((doc) {
-                          final status = (doc.data() as Map<String, dynamic>)['status'] ?? '';
-                          return status.toLowerCase() == _selectedFilter.toLowerCase();
+                          final eventData = doc.data() as Map<String, dynamic>;
+                          final actualStatus = _getActualEventStatus(eventData);
+                          return actualStatus.toLowerCase() == _selectedFilter.toLowerCase();
                         }).toList();
                       }
 
@@ -232,12 +300,12 @@ class _StudentEventsScreenState extends State<StudentEventsScreen> {
     String userId,
   ) {
     final DateTime eventDate = (eventData['date'] as Timestamp).toDate();
-    final String status = eventData['status'] ?? 'upcoming';
+    final String actualStatus = _getActualEventStatus(eventData);
     
     Color statusColor;
     String statusText;
     
-    switch (status) {
+    switch (actualStatus) {
       case 'ongoing':
         statusColor = Colors.green;
         statusText = 'Ongoing';
@@ -420,7 +488,7 @@ class _StudentEventsScreenState extends State<StudentEventsScreen> {
                         const SizedBox(height: 16),
 
                         // Register Button or Status
-                        if (isRegistered && (status == 'upcoming' || status == 'ongoing'))
+                        if (isRegistered && (actualStatus == 'upcoming' || actualStatus == 'ongoing'))
                           ElevatedButton.icon(
                             onPressed: () {
                               Navigator.push(
@@ -473,7 +541,7 @@ class _StudentEventsScreenState extends State<StudentEventsScreen> {
                               ],
                             ),
                           )
-                        else if (status == 'completed')
+                        else if (actualStatus == 'completed')
                           Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             decoration: BoxDecoration(

@@ -467,10 +467,22 @@ class _JoinRequestsScreenState extends State<JoinRequestsScreen> {
         return;
       }
 
-      // 4. Perform batch write for consistency
+      // 4. Fetch full user details
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(studentId)
+          .get();
+
+      if (!userDoc.exists) {
+        throw Exception('User not found');
+      }
+
+      final userData = userDoc.data()!;
+
+      // 5. Perform batch write for consistency
       final batch = FirebaseFirestore.instance.batch();
 
-      // Add student to club members subcollection
+      // Add student to club members subcollection with full details
       final memberRef = FirebaseFirestore.instance
           .collection('clubs')
           .doc(widget.clubId)
@@ -478,7 +490,11 @@ class _JoinRequestsScreenState extends State<JoinRequestsScreen> {
           .doc(studentId);
       batch.set(memberRef, {
         'studentId': studentId,
-        'studentName': studentName,
+        'name': userData['name'] ?? studentName,
+        'email': userData['email'] ?? '',
+        'studentId_field': userData['studentId'] ?? '',
+        'department': userData['department'] ?? '',
+        'photoUrl': userData['photoUrl'],
         'joinedAt': FieldValue.serverTimestamp(),
       });
 

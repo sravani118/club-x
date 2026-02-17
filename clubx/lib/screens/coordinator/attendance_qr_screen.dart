@@ -3,8 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:intl/intl.dart';
 
-enum AttendanceMode { clubSession, eventAttendance }
+enum AttendanceMode { clubSession, eventAttendance, viewSessions }
 
 class AttendanceQRScreen extends StatefulWidget {
   final String clubId;
@@ -42,6 +43,61 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
   void initState() {
     super.initState();
     _loadOngoingEvents();
+    _checkExistingSession();
+  }
+
+  Future<void> _checkExistingSession() async {
+    try {
+      final now = DateTime.now();
+      final startOfDay = DateTime(now.year, now.month, now.day);
+
+      final sessionsSnapshot = await FirebaseFirestore.instance
+          .collection('clubSessions')
+          .where('clubId', isEqualTo: widget.clubId)
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      // Find active session from today
+      DocumentSnapshot? todaySession;
+      for (var doc in sessionsSnapshot.docs) {
+        final data = doc.data();
+        final sessionDate = (data['date'] as Timestamp?)?.toDate();
+        
+        if (sessionDate != null) {
+          final sessionDay = DateTime(sessionDate.year, sessionDate.month, sessionDate.day);
+          if (sessionDay.isAtSameMomentAs(startOfDay)) {
+            todaySession = doc;
+            break;
+          }
+        }
+      }
+
+      if (todaySession != null && mounted) {
+        final sessionData = todaySession.data() as Map<String, dynamic>;
+        final expiresAt = (sessionData['expiresAt'] as Timestamp?)?.toDate();
+        
+        // Check if session is actually expired
+        if (expiresAt != null && DateTime.now().isAfter(expiresAt)) {
+          // Close expired session
+          await FirebaseFirestore.instance
+              .collection('clubSessions')
+              .doc(todaySession.id)
+              .update({
+            'status': 'closed',
+            'closedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          // Load the existing active session
+          setState(() {
+            _activeSessionId = todaySession!.id;
+            _isSessionActive = true;
+            _attendanceCount = sessionData['attendanceCount'] ?? 0;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking existing session: $e');
+    }
   }
 
   @override
@@ -50,16 +106,88 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
     super.dispose();
   }
 
+  String _getActualEventStatus(Map<String, dynamic> eventData) {
+    try {
+      final eventDate = (eventData['date'] as Timestamp).toDate();
+      final eventTime = eventData['time'] as String?;
+      final eventDuration = eventData['duration'] as int? ?? 60;
+
+      // If time is missing, fall back to date-only comparison
+      if (eventTime == null || eventTime.isEmpty) {
+        final now = DateTime.now();
+        final eventEndOfDay = DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          23,
+          59,
+          59,
+        );
+        
+        if (now.isAfter(eventEndOfDay)) {
+          return 'completed';
+        } else if (now.year == eventDate.year && 
+                   now.month == eventDate.month && 
+                   now.day == eventDate.day) {
+          return 'ongoing';
+        } else {
+          return 'upcoming';
+        }
+      }
+
+      // Parse time - handle both "HH:mm" and "HH:mm AM/PM" formats
+      String cleanTime = eventTime.replaceAll(RegExp(r'\s*(AM|PM|am|pm)\s*'), '').trim();
+      final timeParts = cleanTime.split(':');
+      int hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+
+      // Adjust for 12-hour format if AM/PM is present
+      if (eventTime.toUpperCase().contains('PM') && hour < 12) {
+        hour += 12;
+      } else if (eventTime.toUpperCase().contains('AM') && hour == 12) {
+        hour = 0;
+      }
+
+      final eventDateTime = DateTime(
+        eventDate.year,
+        eventDate.month,
+        eventDate.day,
+        hour,
+        minute,
+      );
+
+      final eventEndTime = eventDateTime.add(Duration(minutes: eventDuration));
+      final now = DateTime.now();
+
+      if (now.isBefore(eventDateTime)) {
+        return 'upcoming';
+      } else if (now.isAfter(eventEndTime)) {
+        return 'completed';
+      } else {
+        return 'ongoing';
+      }
+    } catch (e) {
+      debugPrint('❌ [EVENT STATUS ERROR] ${eventData['title']}: $e');
+      return eventData['status'] ?? 'upcoming';
+    }
+  }
+
   Future<void> _loadOngoingEvents() async {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('events')
           .where('clubId', isEqualTo: widget.clubId)
-          .where('status', isEqualTo: 'ongoing')
           .get();
 
+      // Filter events by actual status calculated from date/time
+      final ongoingEvents = snapshot.docs.where((doc) {
+        final data = doc.data();
+        final actualStatus = _getActualEventStatus(data);
+        return actualStatus == 'ongoing';
+      }).toList();
+
       setState(() {
-        _ongoingEvents = snapshot.docs
+        _ongoingEvents = ongoingEvents
             .map((doc) => {
                   'id': doc.id,
                   'title': doc.data()['title'] ?? 'Unknown Event',
@@ -106,14 +234,20 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
                       children: [
                         Expanded(
                           child: _buildModeButton(
-                            'Club Session',
+                            'Sessions',
                             AttendanceMode.clubSession,
                           ),
                         ),
                         Expanded(
                           child: _buildModeButton(
-                            'Event Attendance',
+                            'Events',
                             AttendanceMode.eventAttendance,
+                          ),
+                        ),
+                        Expanded(
+                          child: _buildModeButton(
+                            'History',
+                            AttendanceMode.viewSessions,
                           ),
                         ),
                       ],
@@ -123,54 +257,57 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
               ),
             ),
 
-            // Stats Card
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A2332),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildStat(
-                      Icons.check_circle,
-                      'Attendance Count',
-                      _attendanceCount.toString(),
-                      Colors.green,
-                    ),
-                    Container(
-                      width: 1,
-                      height: 40,
-                      color: Colors.grey[800],
-                    ),
-                    _buildStat(
-                      Icons.person,
-                      'Last Scanned',
-                      _lastScannedStudent ?? 'None',
-                      const Color(0xFFFF6B2C),
-                    ),
-                  ],
+            // Stats Card (only show for active attendance modes)
+            if (_currentMode != AttendanceMode.viewSessions) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2332),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStat(
+                        Icons.check_circle,
+                        'Attendance Count',
+                        _attendanceCount.toString(),
+                        Colors.green,
+                      ),
+                      Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.grey[800],
+                      ),
+                      _buildStat(
+                        Icons.person,
+                        'Last Scanned',
+                        _lastScannedStudent ?? 'None',
+                        const Color(0xFFFF6B2C),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-
-            const SizedBox(height: 24),
+              const SizedBox(height: 24),
+            ],
 
             // Content Area
             Expanded(
               child: _currentMode == AttendanceMode.clubSession
                   ? _buildClubSessionMode()
-                  : _buildEventAttendanceMode(),
+                  : _currentMode == AttendanceMode.eventAttendance
+                      ? _buildEventAttendanceMode()
+                      : _buildSessionsHistoryView(),
             ),
 
             const SizedBox(height: 24),
@@ -307,7 +444,7 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
       stream: FirebaseFirestore.instance
           .collection('clubSessions')
           .doc(_activeSessionId)
-          .snapshots(),
+          .snapshots(includeMetadataChanges: true),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -316,6 +453,18 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
         final sessionData = snapshot.data?.data() as Map<String, dynamic>?;
         if (sessionData == null) {
           return const Center(child: Text('Session not found'));
+        }
+
+        // Check if session has expired
+        final expiresAt = (sessionData['expiresAt'] as Timestamp?)?.toDate();
+        final isExpired = expiresAt != null && DateTime.now().isAfter(expiresAt);
+        final status = sessionData['status'] ?? 'active';
+
+        // Auto-close expired sessions
+        if (isExpired && status == 'active') {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _autoCloseExpiredSession();
+          });
         }
 
         final attendanceCount = sessionData['attendanceCount'] ?? 0;
@@ -447,12 +596,36 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
         return;
       }
 
+      // Check if there's already an active session for this club
+      final now = DateTime.now();
+      final startOfDay = DateTime(now.year, now.month, now.day);
+
+      final existingSessionsSnapshot = await FirebaseFirestore.instance
+          .collection('clubSessions')
+          .where('clubId', isEqualTo: widget.clubId)
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      // Check if any active session is from today
+      for (var doc in existingSessionsSnapshot.docs) {
+        final data = doc.data();
+        final sessionDate = (data['date'] as Timestamp?)?.toDate();
+        
+        if (sessionDate != null) {
+          final sessionDay = DateTime(sessionDate.year, sessionDate.month, sessionDate.day);
+          if (sessionDay.isAtSameMomentAs(startOfDay)) {
+            _showError('A session is already active today. Please end it first.');
+            setState(() => _isLoading = false);
+            return;
+          }
+        }
+      }
+
       final sessionId = FirebaseFirestore.instance
           .collection('clubSessions')
           .doc()
           .id;
 
-      final now = DateTime.now();
       final expiresAt = now.add(const Duration(minutes: 15));
 
       await FirebaseFirestore.instance
@@ -507,6 +680,33 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
       _showError('Failed to end session: $e');
     } finally {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _autoCloseExpiredSession() async {
+    if (_activeSessionId == null || !mounted) return;
+    
+    try {
+      await FirebaseFirestore.instance
+          .collection('clubSessions')
+          .doc(_activeSessionId)
+          .update({
+        'status': 'closed',
+        'closedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        setState(() {
+          _activeSessionId = null;
+          _isSessionActive = false;
+          _attendanceCount = 0;
+          _lastScannedStudent = null;
+        });
+
+        _showError('Session has expired and was automatically closed');
+      }
+    } catch (e) {
+      debugPrint('Failed to auto-close session: $e');
     }
   }
 
@@ -922,7 +1122,9 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
 
       final eventData = eventDoc.data()!;
       
-      if (eventData['status'] != 'ongoing') {
+      // Calculate actual event status dynamically
+      final actualStatus = _getActualEventStatus(eventData);
+      if (actualStatus != 'ongoing') {
         _showError('Event is not currently ongoing');
         return;
       }
@@ -1001,6 +1203,334 @@ class _AttendanceQRScreenState extends State<AttendanceQRScreen> {
     } catch (e) {
       _showError('Failed to mark attendance: $e');
     }
+  }
+
+  // ============ SESSIONS HISTORY VIEW ============
+
+  Widget _buildSessionsHistoryView() {
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('clubSessions')
+            .where('clubId', isEqualTo: widget.clubId)
+            .snapshots(includeMetadataChanges: true),
+        builder: (context, snapshot) {
+          // Debug logging
+          debugPrint('📊 [SESSIONS HISTORY] Connection: ${snapshot.connectionState}');
+          debugPrint('📊 [SESSIONS HISTORY] Has data: ${snapshot.hasData}');
+          debugPrint('📊 [SESSIONS HISTORY] Has error: ${snapshot.hasError}');
+          if (snapshot.hasData) {
+            debugPrint('📊 [SESSIONS HISTORY] Docs count: ${snapshot.data!.docs.length}');
+          }
+          
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B2C)),
+              ),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 80,
+                    color: Colors.red[400],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Error Loading Sessions',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    snapshot.error.toString(),
+                    style: TextStyle(
+                      color: Colors.grey[400],
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            );
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.history,
+                    size: 80,
+                    color: Colors.grey[600],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No Sessions Yet',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sessions will appear here once created.\nGo to "Sessions" tab to start a new session.',
+                    style: TextStyle(
+                      color: Colors.grey[400],
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _currentMode = AttendanceMode.clubSession;
+                      });
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Start Session'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B2C),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Sort sessions by date (most recent first)
+          final sessions = snapshot.data!.docs.toList();
+          sessions.sort((a, b) {
+            final aData = a.data() as Map<String, dynamic>;
+            final bData = b.data() as Map<String, dynamic>;
+            
+            final aDate = (aData['date'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            final bDate = (bData['date'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            
+            return bDate.compareTo(aDate); // Descending order
+          });
+
+          return ListView.builder(
+            itemCount: sessions.length,
+            itemBuilder: (context, index) {
+              final sessionDoc = sessions[index];
+              final sessionData = sessionDoc.data() as Map<String, dynamic>;
+              final sessionId = sessionDoc.id;
+              final status = sessionData['status'] ?? 'unknown';
+              final date = (sessionData['date'] as Timestamp?)?.toDate();
+              final createdAt = (sessionData['createdAt'] as Timestamp?)?.toDate();
+              final expiresAt = (sessionData['expiresAt'] as Timestamp?)?.toDate();
+              final attendanceCount = sessionData['attendanceCount'] ?? 0;
+
+              final isActive = status == 'active' && 
+                             expiresAt != null && 
+                             DateTime.now().isBefore(expiresAt);
+
+              return Card(
+                color: const Color(0xFF1A2332),
+                margin: const EdgeInsets.only(bottom: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: isActive 
+                        ? const Color(0xFFFF6B2C) 
+                        : Colors.grey.withOpacity(0.2),
+                    width: isActive ? 2 : 1,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? const Color(0xFFFF6B2C).withOpacity(0.2)
+                                  : Colors.grey.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              isActive ? Icons.radio_button_checked : Icons.history,
+                              color: isActive ? const Color(0xFFFF6B2C) : Colors.grey,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      date != null
+                                          ? DateFormat('MMM dd, yyyy').format(date)
+                                          : 'Unknown Date',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isActive
+                                            ? Colors.green.withOpacity(0.2)
+                                            : Colors.grey.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: isActive ? Colors.green : Colors.grey,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        isActive ? 'ACTIVE' : status.toUpperCase(),
+                                        style: TextStyle(
+                                          color: isActive ? Colors.green : Colors.grey,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                if (createdAt != null)
+                                  Text(
+                                    'Started: ${DateFormat('hh:mm a').format(createdAt)}',
+                                    style: TextStyle(
+                                      color: Colors.grey[400],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildSessionStat(
+                              Icons.people,
+                              'Attendance',
+                              attendanceCount.toString(),
+                            ),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 40,
+                            color: Colors.grey[800],
+                          ),
+                          Expanded(
+                            child: _buildSessionStat(
+                              Icons.timer,
+                              'Expires',
+                              expiresAt != null
+                                  ? DateFormat('hh:mm a').format(expiresAt)
+                                  : 'N/A',
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isActive) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _activeSessionId = sessionId;
+                                _isSessionActive = true;
+                                _attendanceCount = attendanceCount;
+                                _currentMode = AttendanceMode.clubSession;
+                              });
+                            },
+                            icon: const Icon(Icons.qr_code),
+                            label: const Text('Open Session'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFF6B2C),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSessionStat(IconData icon, String label, String value) {
+    return Column(
+      children: [
+        Icon(icon, color: const Color(0xFFFF6B2C), size: 24),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
   }
 
 

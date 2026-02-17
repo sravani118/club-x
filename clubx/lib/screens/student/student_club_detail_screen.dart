@@ -154,60 +154,31 @@ class StudentClubDetailScreen extends StatelessWidget {
   Widget _buildAttendanceStats(String userId) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collectionGroup('students')
-            .where('studentId', isEqualTo: userId)
-            .snapshots(),
-        builder: (context, attendanceSnapshot) {
-          // Calculate attendance stats
-          int totalSessions = 0;
-          int attendedSessions = 0;
-          DateTime? lastAttendedDate;
-
-          if (attendanceSnapshot.hasData) {
-            // Get all sessions for this club
-            FirebaseFirestore.instance
-                .collection('clubSessions')
-                .where('clubId', isEqualTo: clubId)
-                .where('status', isEqualTo: 'closed')
-                .get()
-                .then((sessionsSnapshot) {
-              totalSessions = sessionsSnapshot.docs.length;
-            });
-
-            // Filter attendance for this club's sessions
-            final attendanceRecords = attendanceSnapshot.data!.docs;
-            
-            for (var record in attendanceRecords) {
-              final sessionId = record.reference.parent.parent?.id;
-              if (sessionId != null) {
-                FirebaseFirestore.instance
-                    .collection('clubSessions')
-                    .doc(sessionId)
-                    .get()
-                    .then((sessionDoc) {
-                  if (sessionDoc.exists && 
-                      sessionDoc.data()?['clubId'] == clubId) {
-                    attendedSessions++;
-                    
-                    final checkInTime = record.data() as Map<String, dynamic>?;
-                    final timestamp = checkInTime?['checkInTime'] as Timestamp?;
-                    if (timestamp != null) {
-                      final date = timestamp.toDate();
-                      if (lastAttendedDate == null || date.isAfter(lastAttendedDate!)) {
-                        lastAttendedDate = date;
-                      }
-                    }
-                  }
-                });
-              }
-            }
+      child: FutureBuilder<Map<String, dynamic>>(
+        future: _calculateAttendanceStats(userId),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A2332),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFFFF6B2C).withOpacity(0.2),
+                  width: 1,
+                ),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B2C)),
+                ),
+              ),
+            );
           }
 
-          final attendancePercentage = totalSessions > 0 
-              ? ((attendedSessions / totalSessions) * 100).toInt()
-              : 0;
+          final stats = snapshot.data!;
+          final attendancePercentage = stats['percentage'] as int;
+          final lastAttendedDate = stats['lastAttended'] as DateTime?;
 
           return Container(
             padding: const EdgeInsets.all(20),
@@ -238,7 +209,7 @@ class StudentClubDetailScreen extends StatelessWidget {
                   child: _buildStatCard(
                     Icons.calendar_today,
                     lastAttendedDate != null
-                        ? DateFormat('MMM dd').format(lastAttendedDate!)
+                        ? DateFormat('MMM dd').format(lastAttendedDate)
                         : 'Never',
                     'Last Attended',
                     const Color(0xFFFF6B2C),
@@ -250,6 +221,66 @@ class StudentClubDetailScreen extends StatelessWidget {
         },
       ),
     );
+  }
+
+  Future<Map<String, dynamic>> _calculateAttendanceStats(String userId) async {
+    try {
+      // Get all closed sessions for this club
+      final sessionsSnapshot = await FirebaseFirestore.instance
+          .collection('clubSessions')
+          .where('clubId', isEqualTo: clubId)
+          .where('status', isEqualTo: 'closed')
+          .get();
+
+      final totalSessions = sessionsSnapshot.docs.length;
+      int attendedSessions = 0;
+      DateTime? lastAttendedDate;
+
+      // Get all attendance records for this student
+      for (var sessionDoc in sessionsSnapshot.docs) {
+        final sessionId = sessionDoc.id;
+        
+        // Check if student attended this session
+        final attendanceDoc = await FirebaseFirestore.instance
+            .collection('clubAttendance')
+            .doc(sessionId)
+            .collection('students')
+            .doc(userId)
+            .get();
+
+        if (attendanceDoc.exists) {
+          attendedSessions++;
+          
+          final data = attendanceDoc.data();
+          final timestamp = data?['checkInTime'] as Timestamp?;
+          if (timestamp != null) {
+            final date = timestamp.toDate();
+            if (lastAttendedDate == null || date.isAfter(lastAttendedDate)) {
+              lastAttendedDate = date;
+            }
+          }
+        }
+      }
+
+      final attendancePercentage = totalSessions > 0 
+          ? ((attendedSessions / totalSessions) * 100).toInt()
+          : 0;
+
+      return {
+        'percentage': attendancePercentage,
+        'totalSessions': totalSessions,
+        'attendedSessions': attendedSessions,
+        'lastAttended': lastAttendedDate,
+      };
+    } catch (e) {
+      print('Error calculating attendance stats: $e');
+      return {
+        'percentage': 0,
+        'totalSessions': 0,
+        'attendedSessions': 0,
+        'lastAttended': null,
+      };
+    }
   }
 
   Widget _buildStatCard(IconData icon, String value, String label, Color color) {
