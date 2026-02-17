@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
 
 class SplashScreen extends StatefulWidget {
@@ -64,18 +66,48 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
 
   Future<void> _navigateToLogin() async {
     // Add your initialization logic here
-    // Example: Check auth state, load data, etc.
     await Future.delayed(const Duration(seconds: 3));
     
-    if (mounted) {
-      context.go('/landing');
+    if (!mounted) return;
+
+    // Check if user is already logged in
+    final user = FirebaseAuth.instance.currentUser;
+    
+    if (user != null) {
+      try {
+        // Get user role from Firestore (force server fetch to get latest data)
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get(const GetOptions(source: Source.server));
+
+        if (userDoc.exists) {
+          final role = (userDoc.data()?['role'] ?? 'student').toString().trim().toLowerCase();
+          
+          // Navigate based on role
+          if (role == 'admin') {
+            context.go('/admin');
+          } else if (role == 'coordinator') {
+            context.go('/coordinator');
+          } else {
+            context.go('/student');
+          }
+          return;
+        }
+      } catch (e) {
+        // If error fetching role, sign out and go to landing
+        await FirebaseAuth.instance.signOut();
+      }
     }
+    
+    // Not logged in or error occurred
+    context.go('/landing');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A2332),
+      backgroundColor: const Color(0xFF0F1B2D),
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,
@@ -87,20 +119,26 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                 const Spacer(flex: 2),
                 // Logo
                 Container(
-                  width: 120,
-                  height: 120,
+                  width: 140,
+                  height: 140,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B35),
                     borderRadius: BorderRadius.circular(28),
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'C',
-                      style: TextStyle(
-                        fontSize: 64,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF6B35).withOpacity(0.4),
+                        blurRadius: 30,
+                        offset: const Offset(0, 0),
+                        spreadRadius: 5,
                       ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Image.asset(
+                      'images/logo.png',
+                      width: 140,
+                      height: 140,
+                      fit: BoxFit.cover,
                     ),
                   ),
                 ),

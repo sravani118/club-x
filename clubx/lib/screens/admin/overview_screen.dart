@@ -32,6 +32,7 @@ class OverviewScreen extends StatelessWidget {
                         physics: const NeverScrollableScrollPhysics(),
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
+                        childAspectRatio: 0.95,
                         children: [
                           StatCard(
                             icon: Icons.groups,
@@ -80,6 +81,49 @@ class OverviewScreen extends StatelessWidget {
                 .limit(5)
                 .snapshots(),
             builder: (context, snapshot) {
+              // Handle errors
+              if (snapshot.hasError) {
+                final errorString = snapshot.error.toString().toLowerCase();
+                final isIndexBuilding = errorString.contains('index is currently building') || 
+                                      errorString.contains('cannot be used yet');
+                
+                if (isIndexBuilding) {
+                  // Index is building - show friendly message
+                  return Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        const CircularProgressIndicator(
+                          color: Color(0xFFFF6B2C),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Setting up activity feed...',
+                          style: TextStyle(
+                            color: Colors.grey[300],
+                            fontSize: 14,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'This will load automatically',
+                          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                
+                // Show error for other types
+                return _buildActivityItem(
+                  Icons.error_outline,
+                  'Error loading activity',
+                  'Please check your connection',
+                  'Now',
+                );
+              }
+              
               if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return _buildActivityItem(
                   Icons.info_outline,

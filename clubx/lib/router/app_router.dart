@@ -6,6 +6,8 @@ import '../screens/home_screen.dart';
 import '../screens/auth/signup_screen.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/admin/admin_dashboard.dart';
+import '../screens/coordinator/coordinator_dashboard.dart';
+import '../screens/student/student_dashboard.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
@@ -40,7 +42,16 @@ final GoRouter appRouter = GoRouter(
       name: 'admin',
       builder: (context, state) => const AdminDashboard(),
     ),
-    // Add more routes here
+    GoRoute(
+      path: '/coordinator',
+      name: 'coordinator',
+      builder: (context, state) => const CoordinatorDashboard(),
+    ),
+    GoRoute(
+      path: '/student',
+      name: 'student',
+      builder: (context, state) => const StudentDashboard(),
+    ),
   ],
   errorBuilder: (context, state) => const ErrorScreen(),
 );

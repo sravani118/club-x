@@ -22,13 +22,56 @@ class EventMonitoringScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('events').snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('events')
+                .snapshots(includeMetadataChanges: true),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
+                debugPrint('❌ [ADMIN_EVENTS] Error: ${snapshot.error}');
+                final errorString = snapshot.error.toString().toLowerCase();
+                final isIndexBuilding = errorString.contains('index is currently building') || 
+                                      errorString.contains('cannot be used yet');
+                
+                if (isIndexBuilding) {
+                  // Index is building - show friendly message
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(
+                          color: Color(0xFFFF6B2C),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Setting up database...',
+                          style: TextStyle(
+                            color: Colors.grey[300],
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'This may take a few minutes.\nThe app will load automatically.',
+                          style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                
                 return Center(
-                  child: Text(
-                    'Error: ${snapshot.error}',
-                    style: const TextStyle(color: Colors.red),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Error: ${snapshot.error}',
+                        style: const TextStyle(color: Colors.red),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
                 );
               }
@@ -40,6 +83,8 @@ class EventMonitoringScreen extends StatelessWidget {
                   ),
                 );
               }
+
+              debugPrint('📊 [ADMIN_EVENTS] Loaded ${snapshot.data?.docs.length ?? 0} events');
 
               if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return Center(

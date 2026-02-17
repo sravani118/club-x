@@ -11,17 +11,18 @@ class ClubManagementScreen extends StatefulWidget {
 }
 
 class _ClubManagementScreenState extends State<ClubManagementScreen> {
-  void _toggleClubStatus(String clubId, bool currentStatus) async {
+  void _toggleClubStatus(String clubId, String currentStatus) async {
     try {
+      final newStatus = currentStatus == 'active' ? 'inactive' : 'active';
       await FirebaseFirestore.instance.collection('clubs').doc(clubId).update({
-        'isActive': !currentStatus,
+        'status': newStatus,
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Club ${!currentStatus ? 'activated' : 'deactivated'} successfully',
+              'Club ${newStatus == 'active' ? 'activated' : 'deactivated'} successfully',
             ),
             backgroundColor: const Color(0xFFFF6B2C),
             behavior: SnackBarBehavior.floating,
@@ -194,13 +195,29 @@ class _ClubManagementScreenState extends State<ClubManagementScreen> {
                       final doc = snapshot.data!.docs[index];
                       final data = doc.data() as Map<String, dynamic>;
 
+                      // Parse sub-coordinator IDs (support both old single and new multiple format)
+                      List<String> subCoordinatorIds = [];
+                      if (data['subCoordinatorIds'] != null) {
+                        // New format: array
+                        subCoordinatorIds = List<String>.from(data['subCoordinatorIds']);
+                      } else if (data['subCoordinatorId'] != null && 
+                                 data['subCoordinatorId'].toString().isNotEmpty) {
+                        // Old format: single string
+                        subCoordinatorIds = [data['subCoordinatorId']];
+                      }
+
                       return ClubCard(
+                        clubId: doc.id,
                         clubName: data['name'] ?? 'Unnamed Club',
+                        category: data['category'] ?? 'Uncategorized',
                         currentMembers: data['currentMembers'] ?? 0,
                         maxMembers: data['maxMembers'] ?? 50,
-                        isActive: data['isActive'] ?? true,
+                        status: data['status'] ?? 'active',
+                        logoUrl: data['logoUrl'],
+                        mainCoordinatorId: data['mainCoordinatorId'] ?? '',
+                        subCoordinatorIds: subCoordinatorIds,
                         onToggle: () =>
-                            _toggleClubStatus(doc.id, data['isActive'] ?? true),
+                            _toggleClubStatus(doc.id, data['status'] ?? 'active'),
                         onEdit: () => _editClub(doc.id, data),
                       );
                     },

@@ -79,11 +79,17 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         password: _passwordController.text,
       );
 
-      // Check user role from Firestore
+      // Check user role from Firestore (force server fetch to get latest data)
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(userCredential.user!.uid)
-          .get();
+          .get(const GetOptions(source: Source.server));
+
+      debugPrint('🔑 [LOGIN] User logged in: ${userCredential.user!.uid}');
+      debugPrint('📊 [LOGIN] User doc exists: ${userDoc.exists}');
+      if (userDoc.exists) {
+        debugPrint('📊 [LOGIN] User data: ${userDoc.data()}');
+      }
 
       // Admin emails configuration
       final adminEmails = [
@@ -98,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       if (adminEmails.contains(_emailController.text.trim().toLowerCase())) {
         userRole = 'admin';
         
-        // Update or create Firestore document with admin role
+        // Update or create Firestore document with admin role (use merge to preserve existing fields like name, profileImage)
         await FirebaseFirestore.instance
             .collection('users')
             .doc(userCredential.user!.uid)
@@ -108,12 +114,19 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           'createdAt': userDoc.exists && userDoc.data()?['createdAt'] != null
               ? userDoc.data()!['createdAt']
               : FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
       } else if (userDoc.exists && userDoc.data() != null) {
         // User document exists and not an admin email
-        userRole = userDoc.data()?['role'] ?? 'student';
+        final userData = userDoc.data()!;
+        userRole = (userData['role'] ?? 'student').toString().trim().toLowerCase();
+        
+        debugPrint('✅ [LOGIN] Existing user - role: $userRole');
+        if (userRole == 'coordinator') {
+          debugPrint('🏛️ [LOGIN] Coordinator detected - clubId: ${userData['clubId']}');
+        }
+        // No write operation - preserves all fields including clubId
       } else {
-        // New user, create document with student role
+        // New user, create document with student role (use merge to preserve any existing fields)
         await FirebaseFirestore.instance
             .collection('users')
             .doc(userCredential.user!.uid)
@@ -121,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           'email': _emailController.text.trim(),
           'role': 'student',
           'createdAt': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
       }
 
       if (mounted) {
@@ -137,8 +150,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         // Redirect based on role
         if (userRole == 'admin') {
           context.go('/admin');
+        } else if (userRole == 'coordinator') {
+          context.go('/coordinator');
         } else {
-          context.go('/home');
+          context.go('/student');
         }
       }
     } on FirebaseAuthException catch (e) {
